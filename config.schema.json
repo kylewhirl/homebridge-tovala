@@ -2,7 +2,7 @@
   "pluginAlias": "TovalaSmartOven",
   "pluginType": "platform",
   "singular": true,
-  "headerDisplay": "<h1><p align='center'>Tovala Smart Oven Integration</H1></p><h1><p align='center'><img src='https://raw.githubusercontent.com/kylewhirl/homebridge-tovala/main/tovala.png' width='80%' style='vertical-align:middle'></p></h1> <br><b>Setup Instructions:</b><br><br>1 - Enter your Tovala email and password below.<br>2 - After saving and restarting Homebridge, your custom recipes will be available as switches.<br><br>For detailed setup instructions, please visit our <a href='https://github.com/kylewhirl/homebridge-tovala'>GitHub page</a>.<br>",
+  "headerDisplay": "<h1><p align='center'>Tovala Smart Oven Integration</H1></p><h1><p align='center'><img src='https://raw.githubusercontent.com/kylewhirl/homebridge-tovala/main/tovala.png' width='200px' style='vertical-align:middle'></p></h1> <br><b>Setup Instructions:</b><br><br>1 - Enter your Tovala email and password below.<br>2 - After saving and restarting Homebridge, your custom recipes will be available as switches.<br><br>For detailed setup instructions, please visit our <a href='https://github.com/kylewhirl/homebridge-tovala'>GitHub page</a>.<br>",
   "footerDisplay": "Tovala Oven Plugin: Control your smart oven from Homebridge",
   "schema": {
     "type": "object",
@@ -29,8 +29,8 @@
       "userId": {
         "title": "<b>User ID</b>",
         "type": "string",
-        "required": true,
-        "description": "User ID associated with your Tovala account"
+        "required": false,
+        "description": "Leave this blank on setup, it will be filled for you"
       }
     }
   },
@@ -51,15 +51,6 @@
             "userId"
           ]
         }
-      ]
-    },
-    {
-      "type": "fieldset",
-      "title": "Optional Settings",
-      "expandable": true,
-      "expanded": false,
-      "items": [
-        "debug"
       ]
     }
   ]
