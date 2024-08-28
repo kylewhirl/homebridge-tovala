@@ -1,4 +1,5 @@
 import axios from 'axios';
+import jwt from 'jsonwebtoken'; // Import the jsonwebtoken library
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { TovalaOvenAccessory } from './platformAccessory.js';
 export class TovalaSmartOvenPlatform {
@@ -29,6 +30,10 @@ export class TovalaSmartOvenPlatform {
     async initializePlatform() {
         try {
             const token = await this.authenticate();
+            const userId = this.decodeUserIdFromToken(token); // Extract userId from token
+            if (userId) {
+                this.config.userId = userId.toString(); // Update config with extracted userId
+            }
             const ovenId = await this.getOvenId(token);
             const recipes = await this.getCustomRecipes(token);
             // Log the recipes for debugging
@@ -60,6 +65,23 @@ export class TovalaSmartOvenPlatform {
         catch (error) {
             this.log.error('Authentication failed:', error);
             throw error;
+        }
+    }
+    decodeUserIdFromToken(token) {
+        try {
+            // Decode the JWT without verifying the signature
+            const decoded = jwt.decode(token);
+            // Check if decoded is null or if userId is undefined
+            if (decoded && decoded.userId !== undefined) {
+                this.log.debug('Decoded userId from token:', decoded.userId);
+                return decoded.userId;
+            }
+            // Return null if userId is not found or decoded is null
+            return null;
+        }
+        catch (error) {
+            this.log.error('Failed to decode JWT:', error);
+            return null;
         }
     }
     async getOvenId(token) {

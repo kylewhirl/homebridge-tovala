@@ -18,7 +18,7 @@
       "userId": {
         "title": "User ID",
         "type": "string",
-        "required": true
+        "required": false
       }
     }
   }

@@ -1,5 +1,6 @@
 import { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig, Service, Characteristic } from 'homebridge';
 import axios from 'axios';
+import jwt from 'jsonwebtoken'; // Import the jsonwebtoken library
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { TovalaOvenAccessory } from './platformAccessory.js';
 
@@ -34,6 +35,10 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
   async initializePlatform(): Promise<void> {
     try {
       const token = await this.authenticate();
+      const userId = this.decodeUserIdFromToken(token); // Extract userId from token
+      if (userId) {
+        this.config.userId = userId.toString(); // Update config with extracted userId
+      }
       const ovenId = await this.getOvenId(token);
       const recipes = await this.getCustomRecipes(token);
 
@@ -66,6 +71,25 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     } catch (error) {
       this.log.error('Authentication failed:', error);
       throw error;
+    }
+  }
+
+  decodeUserIdFromToken(token: string): number | null {
+    try {
+      // Decode the JWT without verifying the signature
+      const decoded = jwt.decode(token) as { userId?: number } | null;
+  
+      // Check if decoded is null or if userId is undefined
+      if (decoded && decoded.userId !== undefined) {
+        this.log.debug('Decoded userId from token:', decoded.userId);
+        return decoded.userId;
+      }
+  
+      // Return null if userId is not found or decoded is null
+      return null;
+    } catch (error) {
+      this.log.error('Failed to decode JWT:', error);
+      return null;
     }
   }
 
@@ -115,7 +139,7 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       this.log.debug(`Creating accessory for recipe: ${recipe.title}`);
       const uuid = this.api.hap.uuid.generate(recipe.barcode);
       const existingAccessory = this.accessories.find(accessory => accessory.UUID === uuid);
-  
+
       if (existingAccessory) {
         this.log.debug(`Updating existing accessory: ${recipe.title}`);
         // Log the barcode when updating an existing accessory
@@ -135,8 +159,6 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     });
   }
   
-  
-
   // Handle accessory restoration from cache
   configureAccessory(accessory: PlatformAccessory): void {
     this.log.debug('Restoring cached accessory:', accessory.displayName);
@@ -147,6 +169,5 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     if (switchService) {
       switchService.updateCharacteristic(this.Characteristic.On, false);
     }
-
   }
 }

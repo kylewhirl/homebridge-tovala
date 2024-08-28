@@ -9,6 +9,7 @@ export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     constructor(log: Logger, config: PlatformConfig, api: API);
     initializePlatform(): Promise<void>;
     authenticate(): Promise<string>;
+    decodeUserIdFromToken(token: string): number | null;
     getOvenId(token: string): Promise<string>;
     getCustomRecipes(token: string): Promise<{
         title: string;
