@@ -17,7 +17,7 @@ export class TovalaSmartOvenPlatform {
         this.Service = this.api.hap.Service;
         this.Characteristic = this.api.hap.Characteristic;
         this.log.debug('TovalaSmartOvenPlatform initialized');
-        if (!this.config.email || !this.config.password || !this.config.userId) {
+        if (!this.config.email || !this.config.password) {
             this.log.error('Missing configuration parameters. Please provide email, password, and userId.');
             return;
         }
