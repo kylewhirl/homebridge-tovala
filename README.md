@@ -7,6 +7,7 @@
 
 <span align="center">
 
+[![verified-by-homebridge](https://img.shields.io/badge/homebridge-verified-blueviolet?color=%23491F59&style=for-the-badge&logoColor=%23FFFFFF&logo=homebridge)](https://github.com/homebridge/homebridge/wiki/Verified-Plugins)
 # Homebridge Tovala Smart Oven Plugin
 
 </span>
