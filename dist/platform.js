@@ -164,6 +164,14 @@ export class TovalaSmartOvenPlatform {
         const accessory = this.accessories.find(a => a.UUID === uuid)
             ?? new this.api.platformAccessory(this.config.name || 'Tovala Oven', uuid);
         accessory.category = 7 /* this.api.hap.Categories.OUTLET */;
+        // If the accessory is brand‑new we give it an initial Name,
+        // but we never touch ConfiguredName so the user can rename it
+        // in HomeKit and have the change persist across restarts.
+        const isNewAccessory = !this.accessories.includes(accessory);
+        const info = accessory.getService(this.Service.AccessoryInformation);
+        if (info && isNewAccessory) {
+            info.setCharacteristic(this.Characteristic.Name, 'Tovala Oven');
+        }
         // ServiceLabel for numeric grouping
         const label = accessory.getService(this.Service.ServiceLabel)
             ?? accessory.addService(this.Service.ServiceLabel);
@@ -173,11 +181,11 @@ export class TovalaSmartOvenPlatform {
             const subtype = recipe.barcode;
             const s = accessory.getServiceById(this.Service.Switch, subtype)
                 ?? accessory.addService(this.Service.Switch, recipe.title, subtype);
-            s.updateCharacteristic(this.Characteristic.Name, recipe.title);
-            s.updateCharacteristic(this.Characteristic.ServiceLabelIndex, i + 1);
-            if (i === 0) {
-                s.setPrimaryService(true);
+            s.setCharacteristic(this.Characteristic.Name, recipe.title);
+            if (this.Characteristic.ConfiguredName) {
+                s.setCharacteristic(this.Characteristic.ConfiguredName, recipe.title);
             }
+            s.setCharacteristic(this.Characteristic.ServiceLabelIndex, i + 1);
             s.getCharacteristic(this.Characteristic.On).onSet(async (val) => {
                 if (val) {
                     await this.startCooking(ovenId, token, recipe.barcode);
@@ -188,6 +196,29 @@ export class TovalaSmartOvenPlatform {
         if (!this.accessories.includes(accessory)) {
             this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
             this.accessories.push(accessory);
+        }
+    }
+    /**
+     * Delete any accessories whose context has a `barcode`
+     * (those are the old stand‑alone recipe switches) if the
+     * user has enabled `groupAccessories === true`.
+     */
+    purgeLegacyAccessories() {
+        if (!this.config.groupAccessories) {
+            return; // nothing to do
+        }
+        const leftovers = this.accessories.filter(a => a.context?.barcode);
+        if (leftovers.length) {
+            this.log.info(`Removing ${leftovers.length} legacy recipe accessory(s) ` +
+                'because “Group accessories” is enabled.');
+            this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, leftovers);
+            // keep our in‑memory list in sync without re‑assigning the readonly array
+            for (const acc of leftovers) {
+                const idx = this.accessories.indexOf(acc);
+                if (idx !== -1) {
+                    this.accessories.splice(idx, 1);
+                }
+            }
         }
     }
     async startCooking(ovenId, token, barcode) {

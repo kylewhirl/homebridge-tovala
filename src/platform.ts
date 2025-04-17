@@ -50,8 +50,10 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       // Create accessories for each recipe
       // this.createRecipeAccessories(recipes, ovenId, token);
       if (this.config.groupAccessories) {
+        this.purgeLegacyAccessories();
         this.createGroupedAccessory(recipes, ovenId, token);
       } else {
+        this.purgeGroupedAccessory();
         this.createRecipeAccessories(recipes, ovenId, token);
       }
     } catch (error) {
@@ -242,6 +244,32 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
 
       // keep our in‑memory list in sync without re‑assigning the readonly array
       for (const acc of leftovers) {
+        const idx = this.accessories.indexOf(acc);
+        if (idx !== -1) {
+          this.accessories.splice(idx, 1);
+        }
+      }
+    }
+  }
+
+  /**
+ * Deletes the single “Tovala Oven” group accessory when
+ * the user has disabled `groupAccessories`.
+ */
+  private purgeGroupedAccessory(): void {
+    if (this.config.groupAccessories) {
+      return;
+    } // nothing to do
+
+    const uuid       = this.api.hap.uuid.generate('tovala-group');
+    const toRemove   = this.accessories.filter(a => a.UUID === uuid);
+
+    if (toRemove.length) {
+      this.log.info('Removing grouped accessory because “Group accessories” is disabled.');
+      this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, toRemove);
+
+      // keep the in‑memory list in sync
+      for (const acc of toRemove) {
         const idx = this.accessories.indexOf(acc);
         if (idx !== -1) {
           this.accessories.splice(idx, 1);

@@ -25,6 +25,12 @@ export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
      * to a single tile that expands on long‑press.
      */
     private createGroupedAccessory;
+    /**
+     * Delete any accessories whose context has a `barcode`
+     * (those are the old stand‑alone recipe switches) if the
+     * user has enabled `groupAccessories === true`.
+     */
+    private purgeLegacyAccessories;
     private startCooking;
     configureAccessory(accessory: PlatformAccessory): void;
 }
