@@ -20,6 +20,8 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     this.Characteristic = this.api.hap.Characteristic;
     this.log.debug('TovalaSmartOvenPlatform initialized');
 
+    this.config.groupAccessories = this.config.groupAccessories ?? true;
+
     if (!this.config.email || !this.config.password ) {
       this.log.error('Missing configuration parameters. Please provide email, password, and userId.');
       return;
@@ -46,7 +48,12 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       this.log.debug('Fetched recipes:', JSON.stringify(recipes, null, 2));
 
       // Create accessories for each recipe
-      this.createRecipeAccessories(recipes, ovenId, token);
+      // this.createRecipeAccessories(recipes, ovenId, token);
+      if (this.config.groupAccessories) {
+        this.createGroupedAccessory(recipes, ovenId, token);
+      } else {
+        this.createRecipeAccessories(recipes, ovenId, token);
+      }
     } catch (error) {
       this.log.error('Failed to initialize platform:', error);
     }
@@ -158,6 +165,62 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       }
     });
   }
+
+  /**
+   * Expose ONE accessory containing a ServiceLabel and
+   * a numbered Switch for each recipe. iOS collapses it
+   * to a single tile that expands on long‑press.
+   */
+  private createGroupedAccessory(
+    recipes: { title: string; barcode: string }[],
+    ovenId: string,
+    token: string,
+  ): void {
+    const uuid = this.api.hap.uuid.generate('tovala-group');
+    const accessory = this.accessories.find(a => a.UUID === uuid)
+      ?? new this.api.platformAccessory(this.config.name || 'Tovala Oven', uuid);
+
+    accessory.category = this.api.hap.Categories.OUTLET;
+
+    // ServiceLabel for numeric grouping
+    const label = accessory.getService(this.Service.ServiceLabel)
+      ?? accessory.addService(this.Service.ServiceLabel);
+    label.updateCharacteristic(this.Characteristic.ServiceLabelNamespace, 1);
+
+    // One Switch service per recipe
+    recipes.forEach((recipe, i) => {
+      const subtype = recipe.barcode;
+      const s = accessory.getServiceById(this.Service.Switch, subtype)
+        ?? accessory.addService(this.Service.Switch, recipe.title, subtype);
+
+      s.updateCharacteristic(this.Characteristic.Name, recipe.title);
+      s.updateCharacteristic(this.Characteristic.ServiceLabelIndex, i + 1);
+      if (i === 0) {
+        s.setPrimaryService(true);
+      }
+
+      s.getCharacteristic(this.Characteristic.On).onSet(async val => {
+        if (val) {
+          await this.startCooking(ovenId, token, recipe.barcode);
+          setTimeout(() => s.updateCharacteristic(this.Characteristic.On, false), 1000);
+        }
+      });
+    });
+
+    if (!this.accessories.includes(accessory)) {
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      this.accessories.push(accessory);
+    }
+  }
+
+  private async startCooking(ovenId: string, token: string, barcode: string) {
+    await axios.post(
+      `https://api.beta.tovala.com/v0/users/${this.config.userId}/ovens/${ovenId}/cook/start`,
+      { barcode },
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+  }
+
   
   // Handle accessory restoration from cache
   configureAccessory(accessory: PlatformAccessory): void {
