@@ -19,5 +19,12 @@ export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
         title: string;
         barcode: string;
     }[], ovenId: string, token: string): void;
+    /**
+     * Expose ONE accessory containing a ServiceLabel and
+     * a numbered Switch for each recipe. iOS collapses it
+     * to a single tile that expands on long‑press.
+     */
+    private createGroupedAccessory;
+    private startCooking;
     configureAccessory(accessory: PlatformAccessory): void;
 }
