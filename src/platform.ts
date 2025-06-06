@@ -3,6 +3,7 @@ import axios from 'axios';
 import jwt from 'jsonwebtoken'; // Import the jsonwebtoken library
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { TovalaOvenAccessory } from './platformAccessory.js';
+import { TovalaOvenDoneSensor } from './ovenSensor.js';
 
 export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service;
@@ -10,6 +11,7 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
 
   // Platform accessories
   private readonly accessories: PlatformAccessory[] = [];
+  public doneSensor?: TovalaOvenDoneSensor;
 
   constructor(
     public readonly log: Logger,
@@ -21,6 +23,8 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     this.log.debug('TovalaSmartOvenPlatform initialized');
 
     this.config.groupAccessories = this.config.groupAccessories ?? true;
+    this.config.enableDoneSensor = this.config.enableDoneSensor ?? true;
+    this.config.doneSensorPoll = Math.max(5, Number(this.config.doneSensorPoll) || 30);
 
     if (!this.config.email || !this.config.password ) {
       this.log.error('Missing configuration parameters. Please provide email, password, and userId.');
@@ -32,6 +36,7 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       this.log.debug('didFinishLaunching callback invoked');
       await this.initializePlatform();
     });
+    this.api.on('shutdown', () => this.doneSensor?.stop?.());
   }
 
   async initializePlatform(): Promise<void> {
@@ -42,6 +47,21 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
         this.config.userId = userId.toString(); // Update config with extracted userId
       }
       const ovenId = await this.getOvenId(token);
+      // Create "Oven Done" motion sensor once
+      if (this.config.enableDoneSensor && !this.doneSensor) {
+        this.log.debug('Creating "Oven Done" motion-sensor accessory');
+        const sensorUuid = this.api.hap.uuid.generate('tovala-done');
+        let sensorAcc = this.accessories.find(a => a.UUID === sensorUuid);
+        if (!sensorAcc) {
+          sensorAcc = new this.api.platformAccessory('Tovala Oven Done', sensorUuid);
+          this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [sensorAcc]);
+          this.accessories.push(sensorAcc);
+        }
+        this.doneSensor = new TovalaOvenDoneSensor(
+          this, sensorAcc, ovenId, this.config.doneSensorPoll);
+      }
+      // Start polling immediately to detect any running or upcoming cook
+      this.doneSensor?.watchCook(token);
       const recipes = await this.getCustomRecipes(token);
 
       // Log the recipes for debugging
@@ -284,6 +304,7 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       { barcode },
       { headers: { Authorization: `Bearer ${token}` } },
     );
+    this.doneSensor?.watchCook(token);
   }
 
   

@@ -2,6 +2,7 @@ import axios from 'axios';
 import jwt from 'jsonwebtoken'; // Import the jsonwebtoken library
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { TovalaOvenAccessory } from './platformAccessory.js';
+import { TovalaOvenDoneSensor } from './ovenSensor.js';
 export class TovalaSmartOvenPlatform {
     log;
     config;
@@ -10,6 +11,7 @@ export class TovalaSmartOvenPlatform {
     Characteristic;
     // Platform accessories
     accessories = [];
+    doneSensor;
     constructor(log, config, api) {
         this.log = log;
         this.config = config;
@@ -18,6 +20,8 @@ export class TovalaSmartOvenPlatform {
         this.Characteristic = this.api.hap.Characteristic;
         this.log.debug('TovalaSmartOvenPlatform initialized');
         this.config.groupAccessories = this.config.groupAccessories ?? true;
+        this.config.enableDoneSensor = this.config.enableDoneSensor ?? true;
+        this.config.doneSensorPoll = Math.max(5, Number(this.config.doneSensorPoll) || 30);
         if (!this.config.email || !this.config.password) {
             this.log.error('Missing configuration parameters. Please provide email, password, and userId.');
             return;
@@ -27,6 +31,7 @@ export class TovalaSmartOvenPlatform {
             this.log.debug('didFinishLaunching callback invoked');
             await this.initializePlatform();
         });
+        this.api.on('shutdown', () => this.doneSensor?.stop?.());
     }
     async initializePlatform() {
         try {
@@ -36,15 +41,31 @@ export class TovalaSmartOvenPlatform {
                 this.config.userId = userId.toString(); // Update config with extracted userId
             }
             const ovenId = await this.getOvenId(token);
+            // Create "Oven Done" motion sensor once
+            if (this.config.enableDoneSensor && !this.doneSensor) {
+                this.log.debug('Creating "Oven Done" motion-sensor accessory');
+                const sensorUuid = this.api.hap.uuid.generate('tovala-done');
+                let sensorAcc = this.accessories.find(a => a.UUID === sensorUuid);
+                if (!sensorAcc) {
+                    sensorAcc = new this.api.platformAccessory('Tovala Oven Done', sensorUuid);
+                    this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [sensorAcc]);
+                    this.accessories.push(sensorAcc);
+                }
+                this.doneSensor = new TovalaOvenDoneSensor(this, sensorAcc, ovenId, this.config.doneSensorPoll);
+            }
+            // Start polling immediately to detect any running or upcoming cook
+            this.doneSensor?.watchCook(token);
             const recipes = await this.getCustomRecipes(token);
             // Log the recipes for debugging
             this.log.debug('Fetched recipes:', JSON.stringify(recipes, null, 2));
             // Create accessories for each recipe
             // this.createRecipeAccessories(recipes, ovenId, token);
             if (this.config.groupAccessories) {
+                this.purgeLegacyAccessories();
                 this.createGroupedAccessory(recipes, ovenId, token);
             }
             else {
+                this.purgeGroupedAccessory();
                 this.createRecipeAccessories(recipes, ovenId, token);
             }
         }
@@ -221,8 +242,31 @@ export class TovalaSmartOvenPlatform {
             }
         }
     }
+    /**
+   * Deletes the single “Tovala Oven” group accessory when
+   * the user has disabled `groupAccessories`.
+   */
+    purgeGroupedAccessory() {
+        if (this.config.groupAccessories) {
+            return;
+        } // nothing to do
+        const uuid = this.api.hap.uuid.generate('tovala-group');
+        const toRemove = this.accessories.filter(a => a.UUID === uuid);
+        if (toRemove.length) {
+            this.log.info('Removing grouped accessory because “Group accessories” is disabled.');
+            this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, toRemove);
+            // keep the in‑memory list in sync
+            for (const acc of toRemove) {
+                const idx = this.accessories.indexOf(acc);
+                if (idx !== -1) {
+                    this.accessories.splice(idx, 1);
+                }
+            }
+        }
+    }
     async startCooking(ovenId, token, barcode) {
         await axios.post(`https://api.beta.tovala.com/v0/users/${this.config.userId}/ovens/${ovenId}/cook/start`, { barcode }, { headers: { Authorization: `Bearer ${token}` } });
+        this.doneSensor?.watchCook(token);
     }
     // Handle accessory restoration from cache
     configureAccessory(accessory) {

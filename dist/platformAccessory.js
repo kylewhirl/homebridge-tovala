@@ -70,6 +70,8 @@ export class TovalaOvenAccessory {
             });
             if (response.status === 200) {
                 this.platform.log.debug(`Cooking started for ${this.accessory.displayName}`);
+                // Notify the "Oven Done" motion sensor watcher (if enabled)
+                this.platform.doneSensor?.watchCook(this.token);
             }
             else {
                 throw new Error(`Unexpected response status: ${response.status}`);

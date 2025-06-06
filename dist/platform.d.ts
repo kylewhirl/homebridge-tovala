@@ -1,4 +1,5 @@
 import { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig, Service, Characteristic } from 'homebridge';
+import { TovalaOvenDoneSensor } from './ovenSensor.js';
 export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     readonly log: Logger;
     readonly config: PlatformConfig;
@@ -6,6 +7,7 @@ export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     readonly Service: typeof Service;
     readonly Characteristic: typeof Characteristic;
     private readonly accessories;
+    doneSensor?: TovalaOvenDoneSensor;
     constructor(log: Logger, config: PlatformConfig, api: API);
     initializePlatform(): Promise<void>;
     authenticate(): Promise<string>;
@@ -31,6 +33,11 @@ export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
      * user has enabled `groupAccessories === true`.
      */
     private purgeLegacyAccessories;
+    /**
+   * Deletes the single “Tovala Oven” group accessory when
+   * the user has disabled `groupAccessories`.
+   */
+    private purgeGroupedAccessory;
     private startCooking;
     configureAccessory(accessory: PlatformAccessory): void;
 }
