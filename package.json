@@ -2,7 +2,7 @@
   "name": "homebridge-tovala",
   "displayName": "Tovala Smart Oven",
   "type": "module",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "private": false,
   "description": "A homebridge plugin for controlling a Tovala Smart Oven",
   "author": "kylewhirl",
