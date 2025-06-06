@@ -6,6 +6,11 @@ export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     readonly Service: typeof Service;
     readonly Characteristic: typeof Characteristic;
     private readonly accessories;
+    private doneSensorService?;
+    private statusInterval?;
+    private pollIntervalMs;
+    private ovenId;
+    private authToken;
     constructor(log: Logger, config: PlatformConfig, api: API);
     initializePlatform(): Promise<void>;
     authenticate(): Promise<string>;
@@ -31,6 +36,14 @@ export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
      * user has enabled `groupAccessories === true`.
      */
     private purgeLegacyAccessories;
+    /**
+   * Deletes the single “Tovala Oven” group accessory when
+   * the user has disabled `groupAccessories`.
+   */
+    private purgeGroupedAccessory;
     private startCooking;
+    private createDoneSensorAccessory;
+    private triggerDoneSensor;
+    private monitorCookStatus;
     configureAccessory(accessory: PlatformAccessory): void;
 }

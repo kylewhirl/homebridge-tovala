@@ -10,6 +10,11 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
 
   // Platform accessories
   private readonly accessories: PlatformAccessory[] = [];
+  private doneSensorService?: Service;
+  private statusInterval?: NodeJS.Timeout;
+  private pollIntervalMs = 60000;
+  private ovenId = '';
+  private authToken = '';
 
   constructor(
     public readonly log: Logger,
@@ -21,6 +26,9 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     this.log.debug('TovalaSmartOvenPlatform initialized');
 
     this.config.groupAccessories = this.config.groupAccessories ?? true;
+    this.config.enableDoneSensor = this.config.enableDoneSensor ?? false;
+    this.config.pollInterval = this.config.pollInterval ?? 60;
+    this.pollIntervalMs = (this.config.pollInterval as number) * 1000;
 
     if (!this.config.email || !this.config.password ) {
       this.log.error('Missing configuration parameters. Please provide email, password, and userId.');
@@ -37,24 +45,29 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
   async initializePlatform(): Promise<void> {
     try {
       const token = await this.authenticate();
+      this.authToken = token;
       const userId = this.decodeUserIdFromToken(token); // Extract userId from token
       if (userId) {
         this.config.userId = userId.toString(); // Update config with extracted userId
       }
       const ovenId = await this.getOvenId(token);
+      this.ovenId = ovenId;
       const recipes = await this.getCustomRecipes(token);
 
       // Log the recipes for debugging
       this.log.debug('Fetched recipes:', JSON.stringify(recipes, null, 2));
 
       // Create accessories for each recipe
-      // this.createRecipeAccessories(recipes, ovenId, token);
       if (this.config.groupAccessories) {
         this.purgeLegacyAccessories();
         this.createGroupedAccessory(recipes, ovenId, token);
       } else {
         this.purgeGroupedAccessory();
         this.createRecipeAccessories(recipes, ovenId, token);
+      }
+
+      if (this.config.enableDoneSensor) {
+        this.createDoneSensorAccessory();
       }
     } catch (error) {
       this.log.error('Failed to initialize platform:', error);
@@ -284,7 +297,69 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       { barcode },
       { headers: { Authorization: `Bearer ${token}` } },
     );
+    if (this.config.enableDoneSensor) {
+      this.monitorCookStatus();
+    }
   }
+  private createDoneSensorAccessory(): void {
+    const uuid = this.api.hap.uuid.generate('tovala-done-sensor');
+    const accessory = this.accessories.find(a => a.UUID === uuid)
+      ?? new this.api.platformAccessory('Oven Done', uuid);
+    accessory.category = this.api.hap.Categories.SENSOR;
+    const service = accessory.getService(this.Service.MotionSensor)
+      ?? accessory.addService(this.Service.MotionSensor);
+    service.updateCharacteristic(this.Characteristic.MotionDetected, false);
+    this.doneSensorService = service;
+    if (!this.accessories.includes(accessory)) {
+      this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+      this.accessories.push(accessory);
+    }
+  }
+
+  private triggerDoneSensor(): void {
+    if (!this.doneSensorService) {
+      return;
+    }
+    this.doneSensorService.updateCharacteristic(this.Characteristic.MotionDetected, true);
+    setTimeout(() => {
+      this.doneSensorService?.updateCharacteristic(this.Characteristic.MotionDetected, false);
+    }, 10000);
+  }
+
+  private async monitorCookStatus(): Promise<void> {
+    if (!this.ovenId || !this.authToken || !this.doneSensorService) {
+      return;
+    }
+    if (this.statusInterval) {
+      clearInterval(this.statusInterval);
+    }
+    let estimatedEnd: string | undefined;
+    const poll = async () => {
+      try {
+        const res = await axios.get(`https://api.beta.tovala.com/v0/users/${this.config.userId}/ovens/${this.ovenId}/cook/status`, {
+          headers: { Authorization: `Bearer ${this.authToken}` },
+        });
+        const data = res.data;
+        estimatedEnd = estimatedEnd ?? data.estimated_end_time;
+        if (data.estimated_end_time !== estimatedEnd) {
+          estimatedEnd = data.estimated_end_time;
+        }
+        const done = data.state !== 'cooking' || Date.now() >= Date.parse(estimatedEnd ?? '');
+        if (done) {
+          this.triggerDoneSensor();
+          if (this.statusInterval) {
+            clearInterval(this.statusInterval);
+            this.statusInterval = undefined;
+          }
+        }
+      } catch (err) {
+        this.log.error('Failed to poll oven status:', err);
+      }
+    };
+    await poll();
+    this.statusInterval = setInterval(poll, this.pollIntervalMs);
+  }
+
 
   
   // Handle accessory restoration from cache
