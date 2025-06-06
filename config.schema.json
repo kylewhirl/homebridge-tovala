@@ -37,19 +37,6 @@
         "type": "boolean",
         "default": true,
         "description": "When enabled (recommended) Homebridge exposes ONE accessory that expands to show every recipe switch."
-      },
-      "enableDoneSensor": {
-        "title": "<b>Enable "Oven Done" Sensor</b>",
-        "type": "boolean",
-        "default": false,
-        "description": "Expose a motion sensor when the oven finishes cooking"
-      },
-      "pollInterval": {
-        "title": "<b>Status Poll Interval (seconds)</b>",
-        "type": "integer",
-        "default": 60,
-        "minimum": 10,
-        "description": "Interval for checking the oven cook status"
       }
     }
   },
@@ -69,8 +56,6 @@
             },
             "userId",
             "groupAccessories"
-            "enableDoneSensor",
-            "pollInterval"
           ]
         }
       ]
