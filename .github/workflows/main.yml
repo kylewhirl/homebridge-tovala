@@ -1,0 +1,33 @@
+name: Homebridge Plugin Test
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  homebridge-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20 # Match your `engines` in package.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build plugin
+        run: npm run build
+
+      - name: Install Homebridge globally
+        run: npm install -g homebridge@2.0.0-beta.0
+
+      - name: Run Homebridge with plugin
+        run: |
+          mkdir -p ~/.homebridge
+          echo '{}' > ~/.homebridge/config.json
+          homebridge --plugin-path . --no-qrcode --debug
