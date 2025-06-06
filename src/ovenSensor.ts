@@ -10,18 +10,59 @@ import { TovalaSmartOvenPlatform } from './platform.js';
  * Tovala returns timestamps like "2025-06-06T07:23:00.000002706Z".
  * This trims to millisecond precision so Date.parse works.
  */
-function parseIsoMillis(iso: string): number {
-  return Date.parse(iso.replace(/\.(\d{3})\d+Z$/, '.$1Z'));
-}
+
+/* ---------------------------------------------------------------------------
+   LEGACY END‑TIME–BASED LOGIC  (commented out 2025‑06‑06 at user request)
+
+   The code below implemented the original scheduling strategy:
+
+     • When state === 'cooking', store estimated_end_time (→ endTimeMs).
+     • Poll again at (endTimeMs ‑ 10 s) to verify oven still cooking
+       and end‑time unchanged.
+     • In the last 10‑second window set triggerTimer to fire motion exactly
+       at endTimeMs.
+     • If the oven reports idle early, cancel triggerTimer and resume
+       interval polling.
+     • If the API updates the end‑time mid‑cook, update endTimeMs and
+       reschedule the 10‑second check.
+
+   It was removed temporarily because the /cook/status endpoint’s
+   estimated_end_time is sometimes stale.  Uncomment and adjust as needed
+   if the API becomes reliable again.
+------------------------------------------------------------------------------
+
+  // private endTimeMs?: number;            // expected end (epoch ms)
+  // private triggerTimer?: NodeJS.Timeout; // fires at end‑time
+
+  // function schedulePreFinishCheck(nowMs: number, endMs: number): void {
+  //   const lead   = 10_000;                       // 10 seconds
+  //   const delay  = Math.max(0, endMs - nowMs - lead);
+  //   clearTimeout(this.pollTimer as NodeJS.Timeout);
+  //   this.pollTimer = setTimeout(poll, delay);
+  // }
+
+  // function armTrigger(timeUntilEnd: number): void {
+  //   if (this.triggerTimer) return;
+  //   this.triggerTimer = setTimeout(() => {
+  //     if (this.watching && this.endTimeMs === endMs) {
+  //       this.triggerMotion();
+  //     }
+  //     this.watching = false;
+  //     this.triggerTimer = undefined;
+  //   }, timeUntilEnd);
+  // }
+
+---------------------------------------------------------------------------- */
 
 export class TovalaOvenDoneSensor {
   private service: Service;
   private pollTimer?: NodeJS.Timeout;
   private timeoutTimer?: NodeJS.Timeout;
   private readonly pollIntervalSec: number;
-  private endTimeMs?: number;            // current cook’s expected end (epoch ms)
-  private triggerTimer?: NodeJS.Timeout; // fires motion exactly at end‑time
+  // private endTimeMs?: number;            // current cook’s expected end (epoch ms)
+  // private triggerTimer?: NodeJS.Timeout; // fires motion exactly at end‑time
   private watching: boolean = false;
+  private isCooking = false;        // tracks last known state
 
   constructor(
     private readonly platform: TovalaSmartOvenPlatform,
@@ -51,11 +92,12 @@ export class TovalaOvenDoneSensor {
     this.watching = true;
     this.cleanup();
 
-    this.endTimeMs = undefined;
-    if (this.triggerTimer) {
-      clearTimeout(this.triggerTimer);
-    }
-    this.triggerTimer = undefined;
+    // this.endTimeMs = undefined;
+    // if (this.triggerTimer) {
+    //   clearTimeout(this.triggerTimer);
+    // }
+    // this.triggerTimer = undefined;
+    this.isCooking = false;  // reset state tracker
 
     const poll = async () => {
       this.platform.log.debug(`[OvenDoneSensor] Polling cook status for oven ${this.ovenId}`);
@@ -72,61 +114,19 @@ export class TovalaOvenDoneSensor {
           return;
         }
 
-        if (!data.estimated_end_time) {
-          // Oven is idle → keep polling every configured interval
-          this.platform.log.debug('[OvenDoneSensor] Oven idle; polling again in ' +
-            `${this.pollIntervalSec}s`);
-          this.pollTimer = setTimeout(poll, this.pollIntervalSec * 1000);
-          return;
+        const currentlyCooking = data.state === 'cooking';
+
+        // Detect state transition
+        if (currentlyCooking && !this.isCooking) {
+          this.platform.log.debug('[OvenDoneSensor] Detected oven just started cooking');
+          this.isCooking = true;
+        } else if (!currentlyCooking && this.isCooking) {
+          this.platform.log.debug('[OvenDoneSensor] Cooking finished ‑ triggering motion');
+          this.triggerMotion();
+          this.isCooking = false;
         }
 
-        if (data.state === 'cooking') {
-          const end = parseIsoMillis(data.estimated_end_time);
-          const now = Date.now();
-          const timeUntilEnd = end - now;
-
-          // Update stored end-time if it changed
-          if (this.endTimeMs !== end) {
-            this.platform.log.debug('[OvenDoneSensor] Updated end-time from API');
-            this.endTimeMs = end;
-          }
-
-          if (timeUntilEnd > 10_000) {
-            // We are more than 10s away → schedule ONE check at (end‑10s)
-            const delay = timeUntilEnd - 10_000;
-            this.platform.log.debug('[OvenDoneSensor] Scheduling pre-finish check ' +
-              `in ${Math.ceil(delay / 1000)}s`);
-            clearTimeout(this.pollTimer as NodeJS.Timeout);
-            this.pollTimer = setTimeout(poll, delay);
-          } else if (timeUntilEnd > 0) {
-            // 10s window → schedule motion trigger exactly at finish
-            if (!this.triggerTimer) {
-              this.platform.log.debug('[OvenDoneSensor] Within 10 s; arming motion trigger');
-              this.triggerTimer = setTimeout(() => {
-                // Fire motion only if still cooking and end-time unchanged
-                if (this.endTimeMs === end && this.watching) {
-                  this.triggerMotion();
-                }
-                this.watching = false;
-                this.triggerTimer = undefined;
-              }, timeUntilEnd);
-            }
-            // No further polling while waiting for trigger
-          } else {
-            // end‑time already passed but still cooking → retry pre‑finish logic in 10s
-            this.platform.log.debug('[OvenDoneSensor] Passed end-time; will retry in 10s');
-            clearTimeout(this.pollTimer as NodeJS.Timeout);
-            this.pollTimer = setTimeout(poll, 10_000);
-          }
-          return;
-        }
-
-        // Oven no longer cooking – cancel pending trigger
-        if (this.triggerTimer) {
-          clearTimeout(this.triggerTimer);
-          this.triggerTimer = undefined;
-        }
-        // Continue polling every interval while idle
+        // Schedule next regular poll
         this.pollTimer = setTimeout(poll, this.pollIntervalSec * 1000);
         return;
       } catch (err) {
@@ -137,19 +137,16 @@ export class TovalaOvenDoneSensor {
         return;
       }
 
-      // If we’re here the cook is done
-      this.triggerMotion();
-      this.watching = false;
     };
 
     poll();
   }
 
   private triggerMotion(): void {
-    if (this.triggerTimer) {
-      clearTimeout(this.triggerTimer);
-      this.triggerTimer = undefined;
-    }
+    // if (this.triggerTimer) {
+    //   clearTimeout(this.triggerTimer);
+    //   this.triggerTimer = undefined;
+    // }
     this.platform.log.debug(`[OvenDoneSensor] Triggering motion event for oven ${this.ovenId}`);
     this.service.updateCharacteristic(
       this.platform.Characteristic.MotionDetected, true);
@@ -168,10 +165,10 @@ export class TovalaOvenDoneSensor {
     if (this.timeoutTimer) {
       clearTimeout(this.timeoutTimer);
     }
-    if (this.triggerTimer) {
-      clearTimeout(this.triggerTimer);
-      this.triggerTimer = undefined;
-    }
+    // if (this.triggerTimer) {
+    //   clearTimeout(this.triggerTimer);
+    //   this.triggerTimer = undefined;
+    // }
   }
   /** Called by the platform on shutdown to clear timers */
   public stop(): void {
