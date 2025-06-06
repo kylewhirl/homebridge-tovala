@@ -5,7 +5,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-
 jobs:
   homebridge-test:
     runs-on: ubuntu-latest
@@ -17,7 +16,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20 # Match your `engines` in package.json
+          node-version: 20
 
       - name: Install dependencies
         run: npm install
@@ -28,8 +27,29 @@ jobs:
       - name: Install Homebridge globally
         run: npm install -g homebridge@2.0.0-beta.0
 
-      - name: Run Homebridge with plugin
+      - name: Run Homebridge and check plugin load
         run: |
           mkdir -p ~/.homebridge
           echo '{}' > ~/.homebridge/config.json
-          homebridge --plugin-path . --no-qrcode --debug
+          
+          # Run homebridge in the background and redirect output
+          homebridge --plugin-path . --no-qrcode --debug > hb_output.log 2>&1 &
+          HB_PID=$!
+          
+          echo "Homebridge PID: $HB_PID"
+
+          # Give it a few seconds to start
+          sleep 10
+
+          # Check output log for plugin load confirmation
+          if grep -q "Loaded plugin: homebridge-tovala" hb_output.log; then
+            echo "Plugin loaded successfully."
+          else
+            echo "Plugin failed to load."
+            cat hb_output.log
+            kill $HB_PID
+            exit 1
+          fi
+
+          # Kill homebridge after check
+          kill $HB_PID
