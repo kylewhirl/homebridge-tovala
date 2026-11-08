@@ -1,5 +1,6 @@
 import { API, DynamicPlatformPlugin, Logger, PlatformAccessory, PlatformConfig, Service, Characteristic } from 'homebridge';
 import { TovalaOvenDoneSensor } from './ovenSensor.js';
+import { AuthenticatedClient } from './authenticatedClient.js';
 export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     readonly log: Logger;
     readonly config: PlatformConfig;
@@ -8,19 +9,20 @@ export declare class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     readonly Characteristic: typeof Characteristic;
     private readonly accessories;
     doneSensor?: TovalaOvenDoneSensor;
+    readonly client: AuthenticatedClient;
     constructor(log: Logger, config: PlatformConfig, api: API);
     initializePlatform(): Promise<void>;
     authenticate(): Promise<string>;
     decodeUserIdFromToken(token: string): number | null;
-    getOvenId(token: string): Promise<string>;
-    getCustomRecipes(token: string): Promise<{
+    getOvenId(): Promise<string>;
+    getCustomRecipes(): Promise<{
         title: string;
         barcode: string;
     }[]>;
     createRecipeAccessories(recipes: {
         title: string;
         barcode: string;
-    }[], ovenId: string, token: string): void;
+    }[], ovenId: string): void;
     /**
      * Expose ONE accessory containing a ServiceLabel and
      * a numbered Switch for each recipe. iOS collapses it
