@@ -1,6 +1,6 @@
 // ==== ovenSensor.ts ==========================================================
 
-import axios from 'axios';
+import { requestErrorSummary } from './authenticatedClient.js';
 import { Service, PlatformAccessory } from 'homebridge';
 import { TovalaSmartOvenPlatform } from './platform.js';
 
@@ -84,7 +84,7 @@ export class TovalaOvenDoneSensor {
    * Called every time the user starts a cook.
    * Cancels any running watcher and starts a new one.
    */
-  public async watchCook(token: string): Promise<void> {
+  public async watchCook(): Promise<void> {
     if (this.watching) {
       this.platform.log.debug('[OvenDoneSensor] Already watching; skipping new watchCook call');
       return;
@@ -98,20 +98,27 @@ export class TovalaOvenDoneSensor {
     // }
     // this.triggerTimer = undefined;
     this.isCooking = false;  // reset state tracker
+    let connected = false;
 
     const poll = async () => {
+      if (!this.watching) {
+        return;
+      }
       this.platform.log.debug(`[OvenDoneSensor] Polling cook status for oven ${this.ovenId}`);
       const statusUrl =
         `https://api.beta.tovala.com/v0/users/${this.platform.config.userId}` +
         `/ovens/${this.ovenId}/cook/status`;
 
       try {
-        const { data } = await axios.get(statusUrl, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const { data } = await this.platform.client.get<{ state: string; estimated_end_time?: string }>(statusUrl);
         this.platform.log.debug(`[OvenDoneSensor] Received status: state=${data.state}, estimated_end_time=${data.estimated_end_time}`);
         if (!this.watching) {
           return;
+        }
+        if (!connected) {
+          const state = ['idle', 'cooking'].includes(data.state) ? data.state : 'unknown';
+          this.platform.log.info(`Cook-status polling connected (state=${state})`);
+          connected = true;
         }
 
         const currentlyCooking = data.state === 'cooking';
@@ -130,7 +137,11 @@ export class TovalaOvenDoneSensor {
         this.pollTimer = setTimeout(poll, this.pollIntervalSec * 1000);
         return;
       } catch (err) {
-        this.platform.log.warn('Cook-status poll failed:', err);
+        if (!this.watching) {
+          return;
+        }
+        connected = false;
+        this.platform.log.warn('Cook-status poll failed:', requestErrorSummary(err));
         this.platform.log.debug(`[OvenDoneSensor] Error polling status, retrying in ${this.pollIntervalSec} seconds`);
         // try again in the configured interval
         this.pollTimer = setTimeout(poll, this.pollIntervalSec * 1000);
@@ -139,7 +150,7 @@ export class TovalaOvenDoneSensor {
 
     };
 
-    poll();
+    await poll();
   }
 
   private triggerMotion(): void {
@@ -172,6 +183,7 @@ export class TovalaOvenDoneSensor {
   }
   /** Called by the platform on shutdown to clear timers */
   public stop(): void {
+    this.watching = false;
     this.cleanup();
   }
 }

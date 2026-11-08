@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken'; // Import the jsonwebtoken library
 import { PLATFORM_NAME, PLUGIN_NAME } from './settings.js';
 import { TovalaOvenAccessory } from './platformAccessory.js';
 import { TovalaOvenDoneSensor } from './ovenSensor.js';
+import { AuthenticatedClient, requestErrorSummary } from './authenticatedClient.js';
 
 export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
   public readonly Service: typeof Service;
@@ -12,6 +13,7 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
   // Platform accessories
   private readonly accessories: PlatformAccessory[] = [];
   public doneSensor?: TovalaOvenDoneSensor;
+  public readonly client = new AuthenticatedClient(() => this.authenticate());
 
   constructor(
     public readonly log: Logger,
@@ -41,12 +43,12 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
 
   async initializePlatform(): Promise<void> {
     try {
-      const token = await this.authenticate();
+      const token = await this.client.getToken();
       const userId = this.decodeUserIdFromToken(token); // Extract userId from token
       if (userId) {
         this.config.userId = userId.toString(); // Update config with extracted userId
       }
-      const ovenId = await this.getOvenId(token);
+      const ovenId = await this.getOvenId();
       // Create "Oven Done" motion sensor once
       if (this.config.enableDoneSensor && !this.doneSensor) {
         this.log.debug('Creating "Oven Done" motion-sensor accessory');
@@ -61,8 +63,8 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
           this, sensorAcc, ovenId, this.config.doneSensorPoll);
       }
       // Start polling immediately to detect any running or upcoming cook
-      this.doneSensor?.watchCook(token);
-      const recipes = await this.getCustomRecipes(token);
+      this.doneSensor?.watchCook();
+      const recipes = await this.getCustomRecipes();
 
       // Log the recipes for debugging
       this.log.debug('Fetched recipes:', JSON.stringify(recipes, null, 2));
@@ -71,13 +73,13 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       // this.createRecipeAccessories(recipes, ovenId, token);
       if (this.config.groupAccessories) {
         this.purgeLegacyAccessories();
-        this.createGroupedAccessory(recipes, ovenId, token);
+        this.createGroupedAccessory(recipes, ovenId);
       } else {
         this.purgeGroupedAccessory();
-        this.createRecipeAccessories(recipes, ovenId, token);
+        this.createRecipeAccessories(recipes, ovenId);
       }
     } catch (error) {
-      this.log.error('Failed to initialize platform:', error);
+      this.log.error('Failed to initialize platform:', requestErrorSummary(error));
     }
   }
 
@@ -89,6 +91,7 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
         password: this.config.password,
         type: 'user',
       }, {
+        timeout: 10_000,
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
@@ -98,7 +101,7 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       this.log.debug('Authentication successful');
       return response.data.token;
     } catch (error) {
-      this.log.error('Authentication failed:', error);
+      this.log.error('Authentication failed:', requestErrorSummary(error));
       throw error;
     }
   }
@@ -122,31 +125,25 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     }
   }
 
-  async getOvenId(token: string): Promise<string> {
+  async getOvenId(): Promise<string> {
     this.log.debug('Fetching oven ID...');
     try {
-      const response = await axios.get(`https://api.beta.tovala.com/v0/users/${this.config.userId}/ovens`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await this.client.get<{ tovala: { id: string } }[]>(
+        `https://api.beta.tovala.com/v0/users/${this.config.userId}/ovens`);
       const ovenId = response.data[0].tovala.id;
       this.log.debug(`Oven ID: ${ovenId}`);
       return ovenId;
     } catch (error) {
-      this.log.error('Failed to fetch oven ID:', error);
+      this.log.error('Failed to fetch oven ID:', requestErrorSummary(error));
       throw error;
     }
   }
 
-  async getCustomRecipes(token: string): Promise<{ title: string; barcode: string; }[]> {
+  async getCustomRecipes(): Promise<{ title: string; barcode: string; }[]> {
     this.log.debug('Fetching custom recipes...');
     try {
-      const response = await axios.get(`https://api.beta.tovala.com/v0/users/${this.config.userId}/customMealDataJSON`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
+      const response = await this.client.get<{ userRecipes: { title: string; barcode: string }[] }>(
+        `https://api.beta.tovala.com/v0/users/${this.config.userId}/customMealDataJSON`);
 
       // Log the raw API response
       this.log.debug('Raw recipes response:', JSON.stringify(response.data, null, 2));
@@ -158,12 +155,12 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
       this.log.debug('Recipes fetched successfully');
       return recipes;
     } catch (error) {
-      this.log.error('Failed to fetch custom recipes:', error);
+      this.log.error('Failed to fetch custom recipes:', requestErrorSummary(error));
       throw error;
     }
   }
 
-  createRecipeAccessories(recipes: { title: string, barcode: string }[], ovenId: string, token: string) {
+  createRecipeAccessories(recipes: { title: string, barcode: string }[], ovenId: string) {
     recipes.forEach(recipe => {
       this.log.debug(`Creating accessory for recipe: ${recipe.title}`);
       const uuid = this.api.hap.uuid.generate(recipe.barcode);
@@ -174,14 +171,14 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
         // Log the barcode when updating an existing accessory
         this.log.debug(`Setting barcode for existing accessory: ${recipe.barcode}`);
         existingAccessory.context.barcode = recipe.barcode;
-        new TovalaOvenAccessory(this, existingAccessory, ovenId, token);
+        new TovalaOvenAccessory(this, existingAccessory, ovenId);
       } else {
         this.log.debug(`Adding new accessory: ${recipe.title}`);
         const accessory = new this.api.platformAccessory(recipe.title, uuid);
         // Log the barcode when creating a new accessory
         this.log.debug(`Setting barcode for new accessory: ${recipe.barcode}`);
         accessory.context.barcode = recipe.barcode;
-        new TovalaOvenAccessory(this, accessory, ovenId, token);
+        new TovalaOvenAccessory(this, accessory, ovenId);
         this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
         this.accessories.push(accessory);
       }
@@ -196,7 +193,6 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
   private createGroupedAccessory(
     recipes: { title: string; barcode: string }[],
     ovenId: string,
-    token: string,
   ): void {
     const uuid = this.api.hap.uuid.generate('tovala-group');
     const accessory = this.accessories.find(a => a.UUID === uuid)
@@ -232,7 +228,7 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
 
       s.getCharacteristic(this.Characteristic.On).onSet(async val => {
         if (val) {
-          await this.startCooking(ovenId, token, recipe.barcode);
+          await this.startCooking(ovenId, recipe.barcode);
           setTimeout(() => s.updateCharacteristic(this.Characteristic.On, false), 1000);
         }
       });
@@ -298,13 +294,12 @@ export class TovalaSmartOvenPlatform implements DynamicPlatformPlugin {
     }
   }
 
-  private async startCooking(ovenId: string, token: string, barcode: string) {
-    await axios.post(
+  private async startCooking(ovenId: string, barcode: string) {
+    await this.client.post(
       `https://api.beta.tovala.com/v0/users/${this.config.userId}/ovens/${ovenId}/cook/start`,
       { barcode },
-      { headers: { Authorization: `Bearer ${token}` } },
     );
-    this.doneSensor?.watchCook(token);
+    this.doneSensor?.watchCook();
   }
 
   

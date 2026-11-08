@@ -1,16 +1,14 @@
-import axios from 'axios';
+import { requestErrorSummary } from './authenticatedClient.js';
 export class TovalaOvenAccessory {
     platform;
     accessory;
     ovenId;
-    token;
     service;
     barcode;
-    constructor(platform, accessory, ovenId, token) {
+    constructor(platform, accessory, ovenId) {
         this.platform = platform;
         this.accessory = accessory;
         this.ovenId = ovenId;
-        this.token = token;
         this.accessory.getService(this.platform.Service.AccessoryInformation)
             .setCharacteristic(this.platform.Characteristic.Manufacturer, 'Tovala')
             .setCharacteristic(this.platform.Characteristic.Model, 'Smart Oven');
@@ -59,11 +57,10 @@ export class TovalaOvenAccessory {
                 throw new Error('Barcode is undefined');
             }
             this.platform.log.debug(`Sending barcode ${this.barcode} to Tovala API`);
-            const response = await axios.post(`https://api.beta.tovala.com/v0/users/${this.platform.config.userId}/ovens/${this.ovenId}/cook/start`, {
+            const response = await this.platform.client.post(`https://api.beta.tovala.com/v0/users/${this.platform.config.userId}/ovens/${this.ovenId}/cook/start`, {
                 barcode: this.barcode,
             }, {
                 headers: {
-                    'Authorization': `Bearer ${this.token}`,
                     'Content-Type': 'application/json',
                     'Accept': 'application/json',
                 },
@@ -71,20 +68,14 @@ export class TovalaOvenAccessory {
             if (response.status === 200) {
                 this.platform.log.debug(`Cooking started for ${this.accessory.displayName}`);
                 // Notify the "Oven Done" motion sensor watcher (if enabled)
-                this.platform.doneSensor?.watchCook(this.token);
+                this.platform.doneSensor?.watchCook();
             }
             else {
                 throw new Error(`Unexpected response status: ${response.status}`);
             }
         }
         catch (error) {
-            if (axios.isAxiosError(error)) {
-                // eslint-disable-next-line max-len
-                this.platform.log.error(`Failed to start cooking for ${this.accessory.displayName}: ${error.response?.status} ${error.response?.statusText} - ${error.response?.data}`);
-            }
-            else {
-                this.platform.log.error(`Failed to start cooking for ${this.accessory.displayName}`, error);
-            }
+            this.platform.log.error(`Failed to start cooking for ${this.accessory.displayName}: ${requestErrorSummary(error)}`);
             throw error;
         }
     }
